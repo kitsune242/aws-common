@@ -1,0 +1,80 @@
+name: "Reusable Terraform"
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: true
+        type: string
+      env:
+        required: true
+        type: string
+      action:
+        required: false
+        type: string
+        default: "plan"
+      common_repo_path:
+        required: false
+        type: string
+        default: "common-repo"
+      common_ref:
+        required: false
+        type: string
+        default: "v1.0.0"
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ inputs.path }}-${{ inputs.env }}
+      cancel-in-progress: false
+    
+    steps:
+      - uses: actions/checkout@v4 # Checkout caller repo
+
+      - name: Checkout Common Repo
+        uses: actions/checkout@v4
+        with:
+          repository: roche-oli/oli-poc-common
+          path: common-repo
+          ref: ${{ inputs.common_ref }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: |
+          cd ${{ inputs.path }}
+          # Derive the state key from the path
+          STATE_KEY="${{ inputs.path }}/terraform.tfstate"
+          
+          # Handle potential remote vs local path for common envs
+          COMMON_INFRA_PATH="${{ inputs.common_repo_path }}/infra"
+          
+          terraform init \
+            -backend-config="${GITHUB_WORKSPACE}/${COMMON_INFRA_PATH}/envs/${{ inputs.env }}.backend.tfvars" \
+            -backend-config="key=${STATE_KEY}"
+
+      - name: Terraform Action
+        run: |
+          cd ${{ inputs.path }}
+          COMMON_INFRA_PATH="${{ inputs.common_repo_path }}/infra"
+          
+          if [ "${{ inputs.action }}" == "apply" ]; then
+            terraform apply -auto-approve -var-file="${GITHUB_WORKSPACE}/${COMMON_INFRA_PATH}/envs/${{ inputs.env }}.tfvars"
+          else
+            terraform plan -var-file="${GITHUB_WORKSPACE}/${COMMON_INFRA_PATH}/envs/${{ inputs.env }}.tfvars"
+          fi

@@ -1,0 +1,102 @@
+name: "Reusable Plugin Deploy"
+
+on:
+  workflow_call:
+    inputs:
+      plugin_path:
+        required: true
+        description: "Path to the plugin (e.g., plugins/puls_data)"
+        type: string
+      env:
+        required: true
+        type: string
+      common_ref:
+        required: false
+        type: string
+        default: "v1.0.0"
+    secrets:
+      AWS_ROLE_ARN:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ inputs.plugin_path }}-${{ inputs.env }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Common Repo
+        uses: actions/checkout@v4
+        with:
+          repository: roche-oli/oli-poc-common
+          path: common-repo
+          ref: ${{ inputs.common_ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build plugin artifact
+        run: |
+          cd ${{ inputs.plugin_path }}/etl
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt -t .
+          fi
+          # Exclude existing zip files, compiled bytecode and cache dirs
+          zip -r ingest.zip . \
+            --exclude "*.zip" \
+            --exclude "*.pyc" \
+            --exclude "__pycache__/*"
+
+      - name: Verify artifact
+        id: artifact
+        run: |
+          if [ ! -f "${{ inputs.plugin_path }}/etl/ingest.zip" ]; then
+            echo "ERROR: ingest.zip was not created"
+            exit 1
+          fi
+          echo "Artifact size: $(du -sh ${{ inputs.plugin_path }}/etl/ingest.zip)"
+          # Sanitize artifact name — upload-artifact@v4 does not allow slashes
+          SAFE_NAME=$(echo "ingest-zip-${{ inputs.plugin_path }}" | tr '/' '-')
+          echo "name=${SAFE_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload Lambda artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ inputs.plugin_path }}/etl/ingest.zip
+          retention-days: 7
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: |
+          cd ${{ inputs.plugin_path }}/infra
+          STATE_KEY="${{ inputs.plugin_path }}/infra/terraform.tfstate"
+          COMMON_INFRA_PATH="${GITHUB_WORKSPACE}/common-repo/infra"
+          terraform init \
+            -backend-config="${COMMON_INFRA_PATH}/envs/${{ inputs.env }}.backend.tfvars" \
+            -backend-config="key=${STATE_KEY}"
+
+      - name: Terraform Apply
+        run: |
+          cd ${{ inputs.plugin_path }}/infra
+          COMMON_INFRA_PATH="${GITHUB_WORKSPACE}/common-repo/infra"
+          terraform apply -auto-approve \
+            -var-file="${COMMON_INFRA_PATH}/envs/${{ inputs.env }}.tfvars"
