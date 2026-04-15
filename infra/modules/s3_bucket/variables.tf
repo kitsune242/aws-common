@@ -14,3 +14,9 @@ variable "sns_notification_topic_arn" {
   type        = string
   default     = null
 }
+
+variable "enable_notification" {
+  description = "Whether to create an S3 bucket notification to the SNS topic"
+  type        = bool
+  default     = false
+}

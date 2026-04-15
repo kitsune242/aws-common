@@ -31,7 +31,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 }
 
 resource "aws_s3_bucket_notification" "this" {
-  count  = var.sns_notification_topic_arn != null ? 1 : 0
+  count  = var.enable_notification ? 1 : 0
   bucket = aws_s3_bucket.this.id
 
   topic {
