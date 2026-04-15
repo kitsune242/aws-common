@@ -15,7 +15,7 @@ Reference these modules using remote git sources:
 
 ```hcl
 module "example" {
-  source = "git::https://github.com/roche-oli/oli-poc-common.git//infra/modules/s3_bucket?ref=v1.0.0"
+  source = "git::https://github.com/kitsune242/aws-common.git//infra/modules/s3_bucket?ref=v1.0.0"
   # ... inputs
 }
 ```

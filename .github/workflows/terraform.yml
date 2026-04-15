@@ -42,7 +42,7 @@ jobs:
       - name: Checkout Common Repo
         uses: actions/checkout@v4
         with:
-          repository: roche-oli/oli-poc-common
+          repository: kitsune242/aws-common
           path: common-repo
           ref: ${{ inputs.common_ref }}
 
